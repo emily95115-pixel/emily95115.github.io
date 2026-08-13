@@ -177,14 +177,21 @@ const WEEKDAY_NAMES = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Frida
 let storageOK = true;
 let lastSaveError = "";
 
+// ---- Google Sheets backend (via Google Apps Script Web App) ----
+// Paste the "Web app" URL you get after deploying the Apps Script below.
+const API_URL = "https://script.google.com/macros/s/https://script.google.com/macros/s/AKfycbxXjl_RnfQzoQVMgZnpCNj7LnwPoRjZA-BfyUjOnpLwfXk1IHfbPVKm7gz-E2LbCd-6zg/exec";
+
 async function loadData() {
-  if (typeof window.storage === "undefined") {
+  try {
+    const res = await fetch(API_URL, { method: "GET" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const json = await res.json();
+    if (json && typeof json === "object") data = { ...emptyData, ...json };
+    storageOK = true; lastSaveError = "";
+  } catch (e) {
     storageOK = false;
-  } else {
-    try {
-      const res = await window.storage.get("centre-data", false);
-      if (res && res.value) data = { ...emptyData, ...JSON.parse(res.value) };
-    } catch (e) { /* nothing saved yet — this is normal on first run */ }
+    lastSaveError = (e && e.message) ? e.message : String(e);
+    console.error("Load failed", e);
   }
 
   // migrate lesson types
@@ -219,9 +226,14 @@ async function loadData() {
   await saveData();
 }
 async function saveData() {
-  if (typeof window.storage === "undefined") { storageOK = false; return; }
   try {
-    await window.storage.set("centre-data", JSON.stringify(data), false);
+    // text/plain avoids a CORS preflight (OPTIONS) request, which Apps Script Web Apps don't handle.
+    const res = await fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status);
     storageOK = true; lastSaveError = "";
   } catch (e) {
     storageOK = false;
@@ -229,6 +241,7 @@ async function saveData() {
     console.error("Save failed", e);
   }
 }
+
 
 function staffSVG(dots, height) {
   height = height || 34;
@@ -1083,11 +1096,10 @@ function render() {
 
   const banner = !storageOK ? `
     <div class="section" style="border-color:var(--burgundy);background:#fff3f0;">
-      <div class="sectionTitle"><h2 style="color:var(--burgundy);font-size:15px;">⚠ Data isn't saving</h2></div>
+      <div class="sectionTitle"><h2 style="color:var(--burgundy);font-size:15px;">⚠ 無法連接雲端資料庫</h2></div>
       <p style="margin:6px 0 0;font-size:13px;">
-        This page can't reach persistent storage right now${lastSaveError ? " (" + esc(lastSaveError) + ")" : ""}.
-        This usually happens when the file is opened on its own outside the Claude conversation (e.g. downloaded and double-clicked, or opened in a plain browser tab) —
-        saved-storage only works while this is viewed as the live artifact inside Claude. Keep working from the artifact panel in your Claude chat so nothing is lost.
+        目前無法讀取或儲存資料${lastSaveError ? "（錯誤：" + esc(lastSaveError) + "）" : ""}。
+        請檢查：① 程式碼中的 API_URL 是否已換成你自己部署的 Google Apps Script 網址；② Apps Script 部署權限是否設為「任何人」；③ 網路連線是否正常。
       </p>
     </div>
   ` : "";
